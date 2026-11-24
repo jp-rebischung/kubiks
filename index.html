@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12141f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Jeu de blocs</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #20241c; color: #c8d0b0; overflow: hidden;
+    font-family: system-ui, sans-serif; -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; touch-action: none; }
+  #app { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  #cadre { background: #3a4032; padding: 10px; border-radius: 10px 10px 26px 10px; box-shadow: 0 4px 0 #14170f; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; background: #d8e8a0; }
+  body.couleur #cadre { background: #2a2e3e; box-shadow: 0 4px 0 #0c0e16; }
+  #barre { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+  #barre button, #btnStart { background: #3a4032; color: #c8d0b0; border: 2px solid #5a6350; border-radius: 14px;
+    padding: 8px 14px; font: inherit; font-weight: 600; letter-spacing: 1px; }
+  #barre button:active, #btnStart.actif { background: #5a6350; }
+  #aideClavier { opacity: .6; }
+  #tactile { display: none; width: 100%; max-width: 460px; box-sizing: border-box; padding: 4px 16px 14px;
+    justify-content: space-between; align-items: center; }
+  #croix { position: relative; width: 156px; height: 156px; flex: none; touch-action: none; }
+  #croix i { position: absolute; background: #4a5240; border-radius: 8px; }
+  #croix .h { left: 0; right: 0; top: 52px; height: 52px; }
+  #croix .v { top: 0; bottom: 0; left: 52px; width: 52px; }
+  #croix b { position: absolute; width: 52px; height: 52px; border-radius: 8px; }
+  #croix[data-dir="haut"] .bh, #croix[data-dir="bas"] .bb, #croix[data-dir="gauche"] .bg, #croix[data-dir="droite"] .bd { background: #7c886a; }
+  #croix .bh { left: 52px; top: 0; } #croix .bb { left: 52px; bottom: 0; }
+  #croix .bg { left: 0; top: 52px; } #croix .bd { right: 0; top: 52px; }
+  #boutons { position: relative; width: 160px; height: 150px; flex: none; }
+  .rond { position: absolute; width: 78px; height: 78px; border-radius: 50%; background: #6a2f45; color: #f0d8e0;
+    border: 3px solid #3c1826; font-size: 24px; font-weight: 700; display: flex; align-items: center; justify-content: center; touch-action: none; }
+  .rond.actif { background: #a04a68; }
+  #btnB { left: 0; bottom: 0; } #btnA { right: 0; top: 0; }
+  body.tactile #tactile { display: flex; }
+  body.tactile #aideClavier { display: none; }
+  @media (hover: none), (pointer: coarse) { #tactile { display: flex; } #aideClavier { display: none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="cadre"><canvas id="ecran" width="160" height="144"></canvas></div>
+  <div id="barre">
+    <button id="btnStart" type="button">START</button>
+    <button id="btnSon" type="button">SON : OUI</button>
+    <span id="aideClavier">Flèches · X · W/Z · Entrée · M</span>
+  </div>
+  <div id="tactile">
+    <div id="croix"><i class="h"></i><i class="v"></i><b class="bh"></b><b class="bb"></b><b class="bg"></b><b class="bd"></b></div>
+    <div id="boutons"><div class="rond" id="btnB">B</div><div class="rond" id="btnA">A</div></div>
+  </div>
+</div>
+<script>
+"use strict";
+/* =====================================================================================
+   RÉGLAGES — tout ce qui se modifie sans toucher au reste du code
+   Les durées sont en « images » (1 image = 1/59,73 s, comme la console d'origine).
+   ===================================================================================== */
+
+// --- Nom du jeu : une seule ligne à changer (affiché sur l'écran titre et dans l'onglet)
+const NOM_DU_JEU = "Kubiks";
+const SOUS_TITRE = "JEU DE BLOCS";
+
+// --- Palette : 4 teintes de vert, de la plus claire (0) à la plus foncée (3)
+const PALETTE = ["#d8e8a0", "#98b048", "#486830", "#182810"];
+
+// --- Mode COULEUR (choisi dans les réglages : ÉCRAN RÉTRO / COULEUR)
+//     Interface sur fond sombre : 0 = fond, 1 = panneaux, 2 = texte secondaire, 3 = texte principal
+const PALETTE_COULEUR = ["#12141f", "#2e3552", "#8a93b8", "#eef0f6"];
+//     Scènes de récompense en couleur : 0 = le plus clair … 3 = ciel de nuit
+const PALETTE_SCENES_COULEUR = ["#fff4d6", "#f4a03c", "#3f8a5a", "#141a3a"];
+//     Une couleur par pièce : L, J, I, O, Z, S, T
+const COULEURS_PIECES = ["#f08c28", "#3c6cf0", "#3cd0e8", "#f0d030", "#e83c3c", "#48c848", "#a050e0"];
+const COULEUR_BLOCS_B = "#6a7088";   // blocs de départ du mode B et rideau de fin de partie
+const COULEUR_MUR = "#2a3048";       // murs autour de la grille
+
+// --- Cadence de la logique du jeu (images par seconde de la console d'origine)
+const IMAGES_PAR_SECONDE = 59.73;
+
+// --- Vitesse de chute : nombre d'images pour descendre d'une ligne, niveaux 0 à 20
+const VITESSES = [53, 49, 45, 41, 37, 33, 28, 22, 17, 11, 10, 9, 8, 7, 6, 6, 5, 5, 4, 4, 3];
+const NIVEAU_MAX = 20;          // la vitesse n'augmente plus au-delà
+const LIGNES_PAR_NIVEAU = 10;   // un niveau de plus toutes les 10 lignes (mode A)
+
+// --- Déplacement latéral quand on maintient une direction
+const DAS_DELAI = 23;           // attente avant que la répétition commence (23 ou 24 selon les sources)
+const DAS_PERIODE = 9;          // ensuite, un déplacement toutes les 9 images
+
+// --- Descente rapide manuelle (bas maintenu)
+const DESCENTE_RAPIDE_IMAGES = 3;   // une ligne toutes les 3 images
+const DESCENTE_A_REAPPUYER = true;  // true : il faut relâcher puis rappuyer sur bas à chaque nouvelle pièce (valeur approchée)
+
+// --- Moment où la pièce se fige : aucun délai, elle se fige dès qu'elle devrait descendre et ne peut pas.
+const ARE_IMAGES = 2;               // attente avant l'apparition de la pièce suivante
+const DELAI_LIGNES_IMAGES = 91;     // durée de l'effacement de lignes (91 + 2 = 93 images comme l'original)
+const CLIGNOTEMENT_IMAGES = 10;     // durée d'un demi-clignotement (approché)
+const CLIGNOTEMENT_FIN = 70;        // après ce nombre d'images, les lignes sont vides avant que le tas tombe (approché)
+
+// --- Score
+const POINTS_LIGNES = [0, 40, 100, 300, 1200]; // 1, 2, 3, 4 lignes, multipliés par (niveau + 1)
+const SCORE_MAX = 999999;
+
+// --- Tirage aléatoire : jusqu'à 3 essais, avec le test « OU binaire » de l'original
+const ESSAIS_TIRAGE = 3;
+
+// --- Mode B
+const LIGNES_MODE_B = 25;
+const RANGEES_PAR_HAUTEUR = 2;      // hauteur 1 = 2 rangées de blocs, hauteur 5 = 10 rangées
+const REMPLISSAGE_HAUTEUR = 0.5;    // proportion de cases pleines dans ces rangées (approché)
+
+// --- Rotation : 1 = le bouton A tourne dans le sens horaire, -1 = sens inverse (incertain : à inverser si besoin)
+const SENS_BOUTON_A = 1;
+
+// --- Récompense de fin de partie (mode A) : paliers de score → montgolfière, dirigeable, soucoupe
+//     (pour voir les scènes sans attendre, mettre par exemple [100, 500, 1000])
+const PALIERS_RECOMPENSE = [100000, 150000, 200000];
+
+// --- Fin de partie : vitesse du rideau qui remplit la grille (images par ligne)
+const RIDEAU_IMAGES_PAR_LIGNE = 4;
+
+// --- Son
+const VOLUME_GENERAL = 0.5;
+const VOLUME_MUSIQUE = 0.30;
+const VOLUME_EFFETS = 0.55;
+
+// --- Touches du clavier (valeurs de « event.key »)
+const TOUCHES = {
+  gauche: ["ArrowLeft"], droite: ["ArrowRight"], haut: ["ArrowUp"], bas: ["ArrowDown"],
+  a: ["x", "X", " "],                 // tourner (bouton A) / valider
+  b: ["w", "W", "z", "Z"],            // tourner dans l'autre sens (bouton B) / retour
+  start: ["Enter", "p", "P", "Escape"], // démarrer / pause
+  son: ["m", "M"]                     // couper ou remettre le son
+};
+// Texte d'aide affiché sur l'écran titre (à tenir à jour si on change les touches)
+const AIDE_TOUCHES = [
+  "< >    DEPLACER",
+  "BAS    DESCENDRE",
+  "X      TOURNER A",
+  "W / Z  TOURNER B",
+  "ENTREE START / PAUSE",
+  "M      COUPER LE SON"
+];
+
+const AIDE_TACTILE = [
+  "CROIX   DEPLACER",
+  "BAS     DESCENDRE",
+  "A / B   TOURNER",
+  "START   JOUER / PAUSE",
+  "SON     COUPER LE SON"
+];
+
+// --- Manette (API Gamepad du navigateur). Numéros de boutons de la disposition « standard » :
+//     0 = bas (A Xbox / croix PlayStation), 1 = droite (B / rond), 2 = gauche (X / carré), 3 = haut (Y / triangle)
+//     8 = Select/Back/Share, 9 = Start/Menu/Options, 12 à 15 = croix directionnelle (haut, bas, gauche, droite)
+const MANETTE = {
+  a: [0, 3],          // tourner (bouton A du jeu)
+  b: [1, 2],          // tourner dans l'autre sens (bouton B du jeu)
+  start: [9],         // démarrer / pause
+  son: [8],           // couper ou remettre le son
+  haut: [12], bas: [13], gauche: [14], droite: [15]
+};
+const MANETTE_STICK = true;        // true : le stick gauche sert aussi de croix directionnelle
+const MANETTE_ZONE_MORTE = 0.5;    // le stick doit être poussé à plus de 50 % pour compter
+const AIDE_MANETTE = [
+  "CROIX   DEPLACER",
+  "BAS     DESCENDRE",
+  "A / Y   TOURNER A",
+  "B / X   TOURNER B",
+  "START   JOUER / PAUSE",
+  "SELECT  COUPER LE SON"
+];
+
+// --- Meilleurs scores
+const NB_SCORES = 5;
+const CLE_SAUVEGARDE = "jeu-de-blocs-89";
+
+// --- Affichage
+const ECHELLE_ENTIERE = true;   // true : agrandissement en multiples entiers (pixels parfaitement nets)
+
+// --- Musiques originales. Notation : NOTE:DURÉE (durée en doubles croches), « - » = silence.
+//     « tempo » en battements par minute ; « basse » : une note fondamentale par demi-mesure.
+//     « accel » (facultatif) : le tempo est multiplié par « facteur » à chaque reprise jusqu'à « max » ;
+//     avec « cycle: true », il revient au tempo de départ une fois le maximum dépassé.
+const MUSIQUES = [
+  { nom: "1", tempo: 150, style: "pompe",
+    chant: "E5:4 C5:2 D5:2 E5:2 G5:2 E5:4  D5:4 B4:2 C5:2 D5:2 F5:2 D5:4  C5:4 A4:2 B4:2 C5:2 E5:2 A5:4  G5:2 F5:2 E5:2 D5:2 E5:6 -:2 " +
+           "A5:4 G5:2 E5:2 F5:4 D5:4  G5:4 F5:2 D5:2 E5:4 C5:4  F5:2 E5:2 D5:2 C5:2 B4:2 C5:2 D5:2 B4:2  A4:6 -:2 A4:2 B4:2 C5:2 D5:2",
+    basse: "A2 A2 G2 G2 A2 A2 E2 E2 F2 F2 C3 C3 D3 E3 A2 A2" },
+  { nom: "2", tempo: 112, style: "arpege",
+    chant: "C5:4 E5:4 G5:4 E5:4  A5:6 G5:2 E5:8  F5:4 A5:4 G5:4 E5:4  D5:6 E5:2 D5:8 " +
+           "C5:4 E5:4 G5:4 C6:4  B5:6 A5:2 G5:8  A5:4 F5:4 E5:4 D5:4  C5:12 -:4",
+    basse: "C3 C3 F2 C3 F2 C3 G2 G2 C3 C3 G2 G2 F2 G2 C3 C3" },
+  { nom: "3", tempo: 168, style: "pompe",
+    chant: "D5:2 F5:2 A5:2 F5:2 D5:2 F5:2 A5:4  C5:2 E5:2 G5:2 E5:2 C5:2 E5:2 G5:4  Bb4:2 D5:2 F5:2 D5:2 Bb4:2 D5:2 F5:2 G5:2  A5:4 G5:2 F5:2 E5:4 C#5:4 " +
+           "D5:2 D5:2 A5:4 G5:2 F5:2 E5:2 F5:2  G5:2 G5:2 C6:4 Bb5:2 A5:2 G5:2 A5:2  Bb5:4 A5:2 G5:2 F5:2 E5:2 D5:2 C#5:2  D5:8 -:4 A4:4",
+    basse: "D3 D3 C3 C3 Bb2 Bb2 A2 A2 D3 D3 C3 C3 Bb2 A2 D3 D3" },
+  // 4 : composition originale dans le style d'une danse russe, mineur puis majeur, accélère à chaque reprise
+  { nom: "4", tempo: 132, style: "pompe", accel: { facteur: 1.04, max: 172, cycle: false },
+    chant: "E5:2 F#5:2 G5:2 E5:2 B5:4 B5:4  A5:2 G5:2 F#5:2 G5:2 A5:4 F#5:4  G5:2 F#5:2 E5:2 D5:2 E5:2 F#5:2 G5:2 E5:2  F#5:4 B4:4 B4:8 " +
+           "E5:2 F#5:2 G5:2 E5:2 C6:4 B5:4  A5:2 B5:2 A5:2 G5:2 F#5:4 D5:4  E5:2 G5:2 F#5:2 D#5:2 E5:4 B4:4  E5:8 -:4 D5:4 " +
+           "G5:2 G5:2 B5:2 G5:2 D6:4 B5:4  C6:2 B5:2 A5:2 B5:2 C6:4 A5:4  B5:2 A5:2 G5:2 A5:2 B5:4 G5:4  A5:2 G5:2 F#5:2 E5:2 D5:4 -:2 D5:2 " +
+           "G5:2 G5:2 B5:2 G5:2 D6:4 B5:4  E6:2 D6:2 C6:2 B5:2 A5:4 C6:4  B5:4 A5:2 F#5:2 G5:4 D5:4  G5:4 D5:2 B4:2 G4:4 B4:4",
+    basse: "E2 E2 D3 D3 E2 C3 B2 B2 E2 C3 D3 D3 E2 B2 E2 D3 G2 G2 C3 C3 G2 G2 D3 D3 G2 G2 C3 A2 D3 D3 G2 D3" },
+  // 5 : arrangement du refrain de « Kalinka » (chanson russe de 1860, domaine public) — part lentement,
+  //     s'emballe à chaque reprise, puis repart lentement (mélodie reconstituée de mémoire)
+  { nom: "5 KALINKA", tempo: 104, style: "pompe", accel: { facteur: 1.12, max: 210, cycle: true },
+    chant: "A5:2 G5:2 F5:4 G5:2 F5:2 E5:4  F5:2 E5:2 D5:2 E5:2 F5:8  D5:2 C5:2 D5:2 E5:2 F5:2 G5:2 A5:4  A5:2 G5:2 F5:2 E5:2 D5:8 " +
+           "A5:2 G5:2 F5:4 G5:2 F5:2 E5:4  F5:2 E5:2 D5:2 E5:2 F5:8  D5:2 C5:2 D5:2 E5:2 F5:2 G5:2 A5:4  A5:2 G5:2 F5:2 E5:2 D5:4 -:4",
+    basse: "D3 A2 D3 D3 Bb2 C3 A2 D3 D3 A2 D3 D3 Bb2 C3 A2 D3" },
+  // 6 : arrangement original de « Korobeiniki » (Les colporteurs), chanson populaire russe du XIXe siècle,
+  //     domaine public. Seule la mélodie populaire est reprise ; l'accompagnement est une création originale.
+  { nom: "6 KOROB", tempo: 144, style: "pompe",
+    chant: "E5:4 B4:2 C5:2 D5:4 C5:2 B4:2  A4:4 A4:2 C5:2 E5:4 D5:2 C5:2  B4:6 C5:2 D5:4 E5:4  C5:4 A4:4 A4:8 " +
+           "D5:6 F5:2 A5:4 G5:2 F5:2  E5:6 C5:2 E5:4 D5:2 C5:2  B4:4 B4:2 C5:2 D5:4 E5:4  C5:4 A4:4 A4:8",
+    basse: "E2 E2 A2 A2 E2 E2 A2 A2 D3 D3 C3 C3 E2 E2 A2 A2" }
+];
+
+/* =====================================================================================
+   À partir d'ici : le moteur du jeu
+   ===================================================================================== */
+const LARGEUR = 10, HAUTEUR = 18, T = 8;       // grille 10 × 18, cases de 8 pixels
+const CHAMP_X = 8;                              // position de la grille dans l'écran 160 × 144
+const PANNEAU_X = 96;
+
+const canvas = document.getElementById("ecran");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+try { document.title = NOM_DU_JEU; } catch (e) {}
+
+/* ---------- Dessin de base ---------- */
+let PAL = PALETTE;   // palette active (rétro, couleur, ou scènes en couleur)
+function couleurActive() { return P.ecran === "couleur"; }
+function rect(x, y, w, h, c) { ctx.fillStyle = PAL[c]; ctx.fillRect(x | 0, y | 0, w | 0, h | 0); }
+function px(x, y, c) { ctx.fillStyle = PAL[c]; ctx.fillRect(Math.round(x), Math.round(y), 1, 1); }
+function cadre(x, y, w, h, fond, bord) { rect(x, y, w, h, bord); rect(x + 1, y + 1, w - 2, h - 2, fond); }
+function ellipse(cx, cy, rx, ry, f) {
+  for (let y = -ry; y <= ry; y++) {
+    const d = Math.round(rx * Math.sqrt(Math.max(0, 1 - (y * y) / (ry * ry + 0.01))));
+    for (let x = -d; x <= d; x++) { const c = f(x, y); if (c >= 0) px(cx + x, cy + y, c); }
+  }
+}
+
+/* ---------- Police pixel 5 × 7 (création originale) ---------- */
+const POLICE_SOURCE = {
+  A: "01110 10001 10001 11111 10001 10001 10001", B: "11110 10001 10001 11110 10001 10001 11110",
+  C: "01110 10001 10000 10000 10000 10001 01110", D: "11110 10001 10001 10001 10001 10001 11110",
+  E: "11111 10000 10000 11110 10000 10000 11111", F: "11111 10000 10000 11110 10000 10000 10000",
+  G: "01110 10001 10000 10111 10001 10001 01111", H: "10001 10001 10001 11111 10001 10001 10001",
+  I: "01110 00100 00100 00100 00100 00100 01110", J: "00111 00010 00010 00010 00010 10010 01100",
+  K: "10001 10010 10100 11000 10100 10010 10001", L: "10000 10000 10000 10000 10000 10000 11111",
+  M: "10001 11011 10101 10101 10001 10001 10001", N: "10001 11001 10101 10011 10001 10001 10001",
+  O: "01110 10001 10001 10001 10001 10001 01110", P: "11110 10001 10001 11110 10000 10000 10000",
+  Q: "01110 10001 10001 10001 10101 10010 01101", R: "11110 10001 10001 11110 10100 10010 10001",
+  S: "01111 10000 10000 01110 00001 00001 11110", T: "11111 00100 00100 00100 00100 00100 00100",
+  U: "10001 10001 10001 10001 10001 10001 01110", V: "10001 10001 10001 10001 10001 01010 00100",
+  W: "10001 10001 10001 10101 10101 11011 10001", X: "10001 10001 01010 00100 01010 10001 10001",
+  Y: "10001 10001 01010 00100 00100 00100 00100", Z: "11111 00001 00010 00100 01000 10000 11111",
+  "0": "01110 10001 10011 10101 11001 10001 01110", "1": "00100 01100 00100 00100 00100 00100 01110",
+  "2": "01110 10001 00001 00110 01000 10000 11111", "3": "11110 00001 00001 01110 00001 00001 11110",
+  "4": "00010 00110 01010 10010 11111 00010 00010", "5": "11111 10000 11110 00001 00001 10001 01110",
+  "6": "00110 01000 10000 11110 10001 10001 01110", "7": "11111 00001 00010 00100 01000 01000 01000",
+  "8": "01110 10001 10001 01110 10001 10001 01110", "9": "01110 10001 10001 01111 00001 00010 01100",
+  ".": "00000 00000 00000 00000 00000 01100 01100", ":": "00000 01100 01100 00000 01100 01100 00000",
+  "-": "00000 00000 00000 11111 00000 00000 00000", "!": "00100 00100 00100 00100 00100 00000 00100",
+  "?": "01110 10001 00001 00110 00100 00000 00100", "/": "00001 00001 00010 00100 01000 10000 10000",
+  "<": "00010 00100 01000 10000 01000 00100 00010", ">": "01000 00100 00010 00001 00010 00100 01000",
+  "+": "00000 00100 00100 11111 00100 00100 00000", "'": "00100 00100 01000 00000 00000 00000 00000",
+  "*": "00000 10101 01110 11111 01110 10101 00000"
+};
+const POLICE = {};
+for (const k in POLICE_SOURCE) POLICE[k] = POLICE_SOURCE[k].replace(/ /g, "");
+function nettoyer(s) { return String(s).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, ""); }
+function texte(s, x, y, c, ech) {
+  ech = ech || 1; s = nettoyer(s); ctx.fillStyle = typeof c === "string" ? c : PAL[c];
+  for (let i = 0; i < s.length; i++) {
+    const g = POLICE[s[i]];
+    if (g) for (let j = 0; j < 35; j++) if (g[j] === "1") ctx.fillRect(x + (i * 6 + j % 5) * ech, y + ((j / 5) | 0) * ech, ech, ech);
+  }
+}
+function largeurTexte(s, ech) { return (String(s).length * 6 - 1) * (ech || 1); }
+function texteCentre(s, y, c, ech, x0, w) {
+  if (x0 === undefined) { x0 = 0; w = 160; }
+  texte(s, x0 + Math.floor((w - largeurTexte(s, ech)) / 2), y, c, ech);
+}
+function texteDroite(s, xd, y, c) { texte(s, xd - largeurTexte(s), y, c); }
+
+/* ---------- Motifs des cases (une texture par pièce, lisible sans couleur) ---------- */
+// 1=L 2=J 3=I 4=O 5=Z 6=S 7=T 8=rideau/blocs de départ 9=mur
+function motif(t, x, y) {
+  const b = (x === 0 || y === 0 || x === 7 || y === 7);
+  const centre = (x >= 3 && x <= 4 && y >= 3 && y <= 4);
+  switch (t) {
+    case 1: return b ? 3 : ((x + y) % 4 < 2 ? 2 : 0);                               // rayures diagonales
+    case 2: return b ? 3 : (centre ? 3 : (x >= 2 && x <= 5 && y >= 2 && y <= 5) ? 0 : 2); // cible
+    case 3: return b ? 3 : (y % 2 ? 1 : 0);                                         // rayures horizontales
+    case 4: return b ? 3 : (centre ? 3 : 0);                                        // clair, point central
+    case 5: return b ? 3 : ((x === 1 || y === 1 || x === 6 || y === 6) ? 1 : 3);    // sombre, liseré
+    case 6: return b ? 3 : ((x + y) % 2 ? 2 : 0);                                   // damier
+    case 7: return b ? 3 : ((x === 1 || y === 1) ? 0 : 1);                          // relief
+    case 8: return (y % 4 === 3 || (x + (y >> 2) * 4) % 8 === 7) ? 3 : 2;           // briques sombres
+    default: return (y % 4 === 0 || (x + ((y >> 2) % 2) * 4) % 8 === 0) ? 3 : 1;    // mur
+  }
+}
+const TUILES = [null];
+for (let t = 1; t <= 9; t++) {
+  const c = document.createElement("canvas"); c.width = c.height = T;
+  const g = c.getContext("2d");
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) { g.fillStyle = PALETTE[motif(t, x, y)]; g.fillRect(x, y, 1, 1); }
+  TUILES.push(c);
+}
+// Tuiles du mode couleur : pièces unies avec un léger relief (bord haut clair, bord bas sombre)
+function melanger(hex, cible, f) {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(cible.slice(1), 16), r = [16, 8, 0].map(d => {
+    const x = (a >> d) & 255, y = (b >> d) & 255; return Math.round(x + (y - x) * f); });
+  return "#" + r.map(v => v.toString(16).padStart(2, "0")).join("");
+}
+function motifCouleur(t, x, y) {
+  if (t === 9) return ((y % 4 === 0 || (x + ((y >> 2) % 2) * 4) % 8 === 0) ? melanger(COULEUR_MUR, "#000000", 0.45) : COULEUR_MUR);
+  const base = t <= 7 ? COULEURS_PIECES[t - 1] : COULEUR_BLOCS_B;
+  if (x === 0 || y === 0) return melanger(base, "#ffffff", 0.45);
+  if (x === 7 || y === 7) return melanger(base, "#000000", 0.40);
+  if ((x === 1 && y <= 2) || (y === 1 && x === 2)) return melanger(base, "#ffffff", 0.70);
+  return base;
+}
+const TUILES_COULEUR = [null];
+for (let t = 1; t <= 9; t++) {
+  const c = document.createElement("canvas"); c.width = c.height = T;
+  const g = c.getContext("2d");
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) { g.fillStyle = motifCouleur(t, x, y); g.fillRect(x, y, 1, 1); }
+  TUILES_COULEUR.push(c);
+}
+function tuile(t, x, y, ech) { ctx.drawImage((couleurActive() ? TUILES_COULEUR : TUILES)[t], x | 0, y | 0, T * (ech || 1), T * (ech || 1)); }
+
+/* ---------- Les 7 pièces et leurs rotations (pas de « wall kick ») ---------- */
+// Numéros internes comme l'original : 0=L 1=J 2=I 3=O 4=Z 5=S 6=T (utile pour le tirage par OU binaire)
+function tourner3(cases) { return cases.map(([x, y]) => [2 - y, x]); }          // quart de tour horaire dans un carré 3 × 3
+function quatreEtats(base) { const e = [base]; for (let i = 0; i < 3; i++) e.push(tourner3(e[i])); return e; }
+const FORMES = [
+  quatreEtats([[0, 1], [1, 1], [2, 1], [0, 2]]),                               // L
+  quatreEtats([[0, 1], [1, 1], [2, 1], [2, 2]]),                               // J
+  [[[0, 1], [1, 1], [2, 1], [3, 1]], [[1, 0], [1, 1], [1, 2], [1, 3]]],        // I : 2 positions
+  [[[1, 1], [2, 1], [1, 2], [2, 2]]],                                          // O
+  [[[0, 1], [1, 1], [1, 2], [2, 2]], [[1, 0], [0, 1], [1, 1], [0, 2]]],        // Z : 2 positions
+  [[[1, 1], [2, 1], [0, 2], [1, 2]], [[0, 0], [0, 1], [1, 1], [1, 2]]],        // S : 2 positions
+  quatreEtats([[0, 1], [1, 1], [2, 1], [1, 2]])                                // T
+];
+const DEPART_X = 3, DEPART_Y = -1;
+
+/* ---------- Sauvegarde (localStorage protégé) ---------- */
+let sauvegarde = { scores: { A: [], B: [] }, prefs: { mode: "A", musique: 0, niveauA: 0, niveauB: 0, hauteur: 0, muet: false, ecran: "retro" } };
+function charger() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CLE_SAUVEGARDE));
+    if (d && d.scores && d.prefs) {
+      sauvegarde.scores.A = Array.isArray(d.scores.A) ? d.scores.A : [];
+      sauvegarde.scores.B = Array.isArray(d.scores.B) ? d.scores.B : [];
+      Object.assign(sauvegarde.prefs, d.prefs);
+    }
+  } catch (e) { /* stockage indisponible : on joue sans sauvegarde */ }
+}
+function sauver() { try { localStorage.setItem(CLE_SAUVEGARDE, JSON.stringify(sauvegarde)); } catch (e) {} }
+function enregistrerScore(mode, entree) {
+  const liste = sauvegarde.scores[mode];
+  liste.push(entree); liste.sort((a, b) => b.s - a.s);
+  const rang = liste.indexOf(entree);
+  liste.length = Math.min(liste.length, NB_SCORES);
+  sauver();
+  return rang < NB_SCORES ? rang : -1;
+}
+charger();
+const P = sauvegarde.prefs;
+
+/* ---------- Son (Web Audio API) ---------- */
+let actx = null, gMaitre = null, gMusique = null, gEffets = null, bruit = null;
+function initAudio() {
+  if (actx) { if (actx.state === "suspended") actx.resume(); return; }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    actx = new AC();
+    gMaitre = actx.createGain(); gMaitre.gain.value = P.muet ? 0 : VOLUME_GENERAL; gMaitre.connect(actx.destination);
+    gEffets = actx.createGain(); gEffets.gain.value = VOLUME_EFFETS; gEffets.connect(gMaitre);
+    gMusique = actx.createGain(); gMusique.gain.value = VOLUME_MUSIQUE; gMusique.connect(gMaitre);
+    bruit = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+    const d = bruit.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  } catch (e) { actx = null; }
+}
+function note(freq, quand, duree, type, vol, dest, freqFin) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, quand);
+  if (freqFin) o.frequency.linearRampToValueAtTime(freqFin, quand + duree);
+  g.gain.setValueAtTime(0, quand); g.gain.linearRampToValueAtTime(vol, quand + 0.005);
+  g.gain.setValueAtTime(vol, quand + Math.max(0.006, duree - 0.02)); g.gain.linearRampToValueAtTime(0, quand + duree);
+  o.connect(g); g.connect(dest); o.start(quand); o.stop(quand + duree + 0.03);
+}
+function souffle(quand, duree, vol) {
+  if (!actx) return;
+  const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = bruit; s.loop = true;
+  g.gain.setValueAtTime(vol, quand); g.gain.linearRampToValueAtTime(0, quand + duree);
+  s.connect(g); g.connect(gEffets); s.start(quand); s.stop(quand + duree + 0.02);
+}
+function suite(freqs, pas, type, vol) { if (!actx) return; const t = actx.currentTime; freqs.forEach((f, i) => { if (f) note(f, t + i * pas, pas * 0.95, type || "square", vol || 0.2, gEffets); }); }
+const sfx = {
+  deplacer() { suite([330], 0.03, "square", 0.10); },
+  tourner() { suite([520, 780], 0.03, "square", 0.12); },
+  poser() { if (!actx) return; souffle(actx.currentTime, 0.07, 0.25); suite([110], 0.06, "triangle", 0.35); },
+  ligne() { suite([523, 659, 784, 1047], 0.06, "square", 0.18); },
+  quatre() { suite([523, 659, 784, 1047, 784, 1047, 1319, 1568], 0.07, "square", 0.2); },
+  niveau() { suite([784, 988, 1175, 1568], 0.08, "triangle", 0.3); },
+  menu() { suite([880], 0.04, "square", 0.12); },
+  valider() { suite([660, 990], 0.06, "square", 0.15); },
+  pause() { suite([880, 660, 880, 660], 0.06, "square", 0.15); },
+  fin() { if (!actx) return; note(440, actx.currentTime, 1.0, "triangle", 0.35, gEffets, 70); },
+  bravo() { suite([523, 659, 784, 1047, 0, 784, 1047, 1319], 0.11, "square", 0.2); },
+  decollage() { if (!actx) return; const t = actx.currentTime; souffle(t, 2.2, 0.3); note(80, t, 2.2, "sawtooth", 0.15, gEffets, 520); },
+  feu() { if (!actx) return; souffle(actx.currentTime, 0.25, 0.2); suite([1319, 988], 0.05, "square", 0.08); }
+};
+
+// Musique : les notes sont programmées un peu à l'avance par un petit séquenceur
+const DEMI_TONS = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function frequence(nom) {
+  const m = /^([A-G])(#|b)?(\d)$/.exec(nom); if (!m) return 0;
+  const midi = 12 * (Number(m[3]) + 1) + DEMI_TONS[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+function preparerMusique(m) {
+  const ev = []; let pas = 0;
+  m.chant.trim().split(/\s+/).forEach(tok => {
+    const [n, d] = tok.split(":"); const duree = Number(d);
+    if (n !== "-") ev.push({ t: pas, d: duree, f: frequence(n), v: 0 });
+    pas += duree;
+  });
+  const total = pas;
+  m.basse.trim().split(/\s+/).forEach((n, i) => {
+    const f = frequence(n);
+    const mult = m.style === "arpege" ? [1, 1.5, 2, 1.5] : [1, 1.5, 1, 1.5];
+    for (let k = 0; k < 4; k++) ev.push({ t: i * 8 + k * 2, d: 2, f: f * mult[k], v: 1 });
+  });
+  ev.sort((a, b) => a.t - b.t);
+  return { ev, total, tempo: m.tempo, accel: m.accel || null };
+}
+const PISTES = MUSIQUES.map(preparerMusique);
+let lecture = null;
+function jouerMusique(i) {
+  arreterMusique();
+  if (!actx || i < 0 || i >= PISTES.length) return;
+  lecture = { piste: PISTES[i], tBoucle: actx.currentTime + 0.08, index: 0, tempo: PISTES[i].tempo };
+}
+function arreterMusique() {
+  lecture = null;
+  if (actx && gMusique) { try { gMusique.disconnect(); } catch (e) {} gMusique = actx.createGain(); gMusique.gain.value = VOLUME_MUSIQUE; gMusique.connect(gMaitre); }
+}
+function planifierMusique() {
+  if (!lecture || !actx) return;
+  const p = lecture.piste, horizon = actx.currentTime + 0.3;
+  for (let garde = 0; garde < 200; garde++) {
+    const e = p.ev[lecture.index], pas = 60 / lecture.tempo / 4;
+    const quand = lecture.tBoucle + e.t * pas;
+    if (quand > horizon) break;
+    if (quand >= actx.currentTime - 0.05) {
+      if (e.v === 0) note(e.f, quand, e.d * pas * 0.9, "square", 0.16, gMusique);
+      else note(e.f, quand, e.d * pas * 0.8, "triangle", 0.30, gMusique);
+    }
+    if (++lecture.index >= p.ev.length) {
+      lecture.index = 0; lecture.tBoucle += p.total * pas;
+      if (p.accel) { let t = lecture.tempo * p.accel.facteur; if (t > p.accel.max) t = p.accel.cycle ? p.tempo : p.accel.max; lecture.tempo = t; }
+    }
+  }
+}
+setInterval(planifierMusique, 60);
+
+const btnSon = document.getElementById("btnSon");
+function majBoutonSon() { btnSon.textContent = P.muet ? "SON : NON" : "SON : OUI"; }
+function basculerSon() {
+  initAudio(); P.muet = !P.muet;
+  if (gMaitre) gMaitre.gain.value = P.muet ? 0 : VOLUME_GENERAL;
+  majBoutonSon(); sauver();
+}
+btnSon.addEventListener("click", () => { basculerSon(); btnSon.blur(); });
+majBoutonSon();
+
+/* ---------- Entrées : clavier et tactile ---------- */
+const tenu = { gauche: false, droite: false, haut: false, bas: false, a: false, b: false, start: false };
+let appuis = {};                       // boutons enfoncés depuis la dernière image de jeu
+function appuyer(b) { initAudio(); if (!tenu[b]) { tenu[b] = true; appuis[b] = true; } }
+function relacher(b) { tenu[b] = false; }
+function boutonDeTouche(k) { for (const b in TOUCHES) if (TOUCHES[b].indexOf(k) >= 0) return b; return null; }
+window.addEventListener("keydown", e => {
+  const b = boutonDeTouche(e.key); if (!b) return;
+  e.preventDefault(); if (e.repeat) return;
+  if (b === "son") basculerSon(); else appuyer(b);
+});
+window.addEventListener("keyup", e => { const b = boutonDeTouche(e.key); if (b && b !== "son") { e.preventDefault(); relacher(b); } });
+window.addEventListener("blur", () => { for (const b in tenu) tenu[b] = false; });
+document.addEventListener("contextmenu", e => e.preventDefault());
+
+function brancherBouton(id, b) {
+  const el = document.getElementById(id);
+  const bas = e => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (x) {} el.classList.add("actif"); appuyer(b); };
+  const haut = e => { e.preventDefault(); el.classList.remove("actif"); relacher(b); };
+  el.addEventListener("pointerdown", bas); el.addEventListener("pointerup", haut); el.addEventListener("pointercancel", haut);
+}
+brancherBouton("btnA", "a"); brancherBouton("btnB", "b"); brancherBouton("btnStart", "start");
+// Croix directionnelle : on peut glisser le pouce d'une direction à l'autre sans le lever
+const croix = document.getElementById("croix"); let croixDir = null;
+function majCroix(e) {
+  const r = croix.getBoundingClientRect();
+  const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  let d = null;
+  if (Math.hypot(dx, dy) > r.width * 0.12) d = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "gauche" : "droite") : (dy < 0 ? "haut" : "bas");
+  if (d !== croixDir) { if (croixDir) relacher(croixDir); croixDir = d; if (d) appuyer(d); croix.dataset.dir = d || ""; }
+}
+croix.addEventListener("pointerdown", e => { e.preventDefault(); try { croix.setPointerCapture(e.pointerId); } catch (x) {} majCroix(e); });
+croix.addEventListener("pointermove", e => { if (e.buttons || e.pointerType === "touch") { e.preventDefault(); if (croixDir !== null || e.pressure > 0) majCroix(e); } });
+function finCroix(e) { e.preventDefault(); if (croixDir) relacher(croixDir); croixDir = null; croix.dataset.dir = ""; }
+croix.addEventListener("pointerup", finCroix); croix.addEventListener("pointercancel", finCroix);
+window.addEventListener("touchstart", () => { document.body.classList.add("tactile"); ajusterTaille(); initAudio(); }, { once: true, passive: true });
+canvas.addEventListener("pointerdown", initAudio);
+
+// Manette : lue à chaque image de jeu ; on ne transmet que les changements (appui / relâchement)
+const manetteTenu = {};
+let manetteBranchee = false;
+function lireManette() {
+  let pads = [];
+  try { pads = navigator.getGamepads ? navigator.getGamepads() : []; } catch (e) { return; }
+  let pad = null;
+  for (const g of pads) if (g && g.connected) { pad = g; break; }
+  manetteBranchee = !!pad;
+  const etatActuel = {};
+  if (pad) {
+    const presse = i => { const b = pad.buttons[i]; return !!b && (b.pressed || b.value > 0.5); };
+    for (const nom in MANETTE) etatActuel[nom] = MANETTE[nom].some(presse);
+    if (MANETTE_STICK && pad.axes.length >= 2) {
+      const ax = pad.axes[0], ay = pad.axes[1], z = MANETTE_ZONE_MORTE;
+      if (Math.abs(ax) >= Math.abs(ay)) { if (ax < -z) etatActuel.gauche = true; if (ax > z) etatActuel.droite = true; }
+      else { if (ay < -z) etatActuel.haut = true; if (ay > z) etatActuel.bas = true; }
+    }
+  }
+  for (const nom of ["gauche", "droite", "haut", "bas", "a", "b", "start", "son"]) {
+    const avant = !!manetteTenu[nom], maintenant = !!etatActuel[nom];
+    if (maintenant && !avant) { if (nom === "son") basculerSon(); else appuyer(nom); }
+    if (!maintenant && avant && nom !== "son") relacher(nom);
+    manetteTenu[nom] = maintenant;
+  }
+}
+window.addEventListener("gamepadconnected", () => { manetteBranchee = true; });
+window.addEventListener("gamepaddisconnected", () => { for (const b in tenu) tenu[b] = false; });
+
+function ajusterTaille() {
+  const tact = document.getElementById("tactile"), barre = document.getElementById("barre");
+  const dispoL = window.innerWidth - 28;
+  const dispoH = window.innerHeight - tact.offsetHeight - barre.offsetHeight - 50;
+  let e = Math.min(dispoL / 160, dispoH / 144);
+  e = ECHELLE_ENTIERE ? Math.max(1, Math.floor(e)) : Math.max(1, e);
+  canvas.style.width = (160 * e) + "px"; canvas.style.height = (144 * e) + "px";
+}
+window.addEventListener("resize", ajusterTaille);
+
+/* ---------- État du programme ---------- */
+let etat = "titre";       // titre, reglages, jeu, pause, fin, recompense, reussite, scores
+let horloge = 0;          // compteur d'images global (pour les clignotements)
+let J = null;             // la partie en cours
+let ligneReglage = 0;
+let R = null;             // scène de récompense
+let resultat = { mode: "A", score: 0, rang: -1 };
+
+/* ---------- Partie ---------- */
+function tirerPiece() {
+  // Tirage de l'original : jusqu'à 3 essais ; un essai est rejeté si (essai OU pièce précédente OU
+  // pièce d'avant) redonne la pièce d'avant. Résultat : moins de répétitions, mais pas de « sac de 7 ».
+  let n = 0;
+  for (let i = 0; i < ESSAIS_TIRAGE; i++) {
+    n = Math.floor(Math.random() * 7);
+    if (J.h2 < 0 || ((n | J.h1 | J.h2) !== J.h2)) break;
+  }
+  J.h2 = J.h1; J.h1 = n;
+  return n;
+}
+function collision(type, rot, x, y) {
+  const f = FORMES[type][rot];
+  for (let i = 0; i < 4; i++) {
+    const cx = x + f[i][0], cy = y + f[i][1];
+    if (cx < 0 || cx >= LARGEUR || cy >= HAUTEUR) return true;
+    if (cy >= 0 && J.grille[cy][cx]) return true;
+  }
+  return false;
+}
+function lancerPartie() {
+  const mode = P.mode, niveau = mode === "A" ? P.niveauA : P.niveauB;
+  J = { mode, niveau, depart: niveau, hauteur: mode === "B" ? P.hauteur : 0, score: 0, lignes: 0,
+        grille: [], piece: null, suivante: 0, h1: -1, h2: -1, phase: "chute", cpt: 0,
+        gravite: 0, das: 0, dir: 0, descenteArmee: false, cptDescente: 0, ptsDescente: 0, pleines: [], cptFin: 0 };
+  for (let y = 0; y < HAUTEUR; y++) J.grille.push(new Array(LARGEUR).fill(0));
+  if (mode === "B") {
+    for (let y = HAUTEUR - J.hauteur * RANGEES_PAR_HAUTEUR; y < HAUTEUR; y++) {
+      let pleins = 0;
+      for (let x = 0; x < LARGEUR; x++) if (Math.random() < REMPLISSAGE_HAUTEUR) { J.grille[y][x] = 8; pleins++; }
+      if (pleins === LARGEUR) J.grille[y][Math.floor(Math.random() * LARGEUR)] = 0;
+    }
+  }
+  J.suivante = tirerPiece();
+  nouvellePiece();
+  etat = "jeu";
+  jouerMusique(P.musique);
+}
+function nouvellePiece() {
+  J.piece = { type: J.suivante, rot: 0, x: DEPART_X, y: DEPART_Y };
+  J.suivante = tirerPiece();
+  J.gravite = 0; J.cptDescente = 0; J.ptsDescente = 0; J.phase = "chute";
+  J.descenteArmee = !DESCENTE_A_REAPPUYER && tenu.bas;
+  if (collision(J.piece.type, J.piece.rot, J.piece.x, J.piece.y)) finDePartie();
+}
+function verrouiller() {
+  const p = J.piece, f = FORMES[p.type][p.rot];
+  for (let i = 0; i < 4; i++) { const cx = p.x + f[i][0], cy = p.y + f[i][1]; if (cy >= 0) J.grille[cy][cx] = p.type + 1; }
+  J.score = Math.min(SCORE_MAX, J.score + J.ptsDescente);   // points de descente rapide : la dernière poussée ininterrompue
+  J.piece = null;
+  J.pleines = [];
+  for (let y = 0; y < HAUTEUR; y++) if (J.grille[y].every(c => c)) J.pleines.push(y);
+  if (J.pleines.length) { J.phase = "clignote"; J.cpt = 0; (J.pleines.length === 4 ? sfx.quatre : sfx.ligne)(); }
+  else { J.phase = "are"; J.cpt = ARE_IMAGES; sfx.poser(); }
+}
+function retirerLignes() {
+  const n = J.pleines.length;
+  J.grille = J.grille.filter((_, y) => J.pleines.indexOf(y) < 0);
+  while (J.grille.length < HAUTEUR) J.grille.unshift(new Array(LARGEUR).fill(0));
+  J.score = Math.min(SCORE_MAX, J.score + POINTS_LIGNES[n] * (J.niveau + 1));   // au niveau d'avant la montée
+  J.lignes += n; J.pleines = [];
+  if (J.mode === "A") {
+    const nv = Math.min(NIVEAU_MAX, Math.max(J.depart, Math.floor(J.lignes / LIGNES_PAR_NIVEAU)));
+    if (nv > J.niveau) { J.niveau = nv; sfx.niveau(); }
+  } else if (J.lignes >= LIGNES_MODE_B) { reussiteModeB(); return; }
+  J.phase = "are"; J.cpt = ARE_IMAGES;
+}
+function deplacer(dx) {
+  const p = J.piece;
+  if (!collision(p.type, p.rot, p.x + dx, p.y)) { p.x += dx; sfx.deplacer(); return true; }
+  return false;
+}
+function logiqueJeu() {
+  if (appuis.start) { etat = "pause"; arreterMusique(); sfx.pause(); return; }
+  if (J.phase === "clignote") { if (++J.cpt >= DELAI_LIGNES_IMAGES) retirerLignes(); return; }
+  if (J.phase === "are") { if (--J.cpt <= 0) nouvellePiece(); return; }
+  const p = J.piece;
+  // 1. Rotation : si la place n'est pas libre, la pièce ne tourne pas (aucun décalage automatique)
+  let sens = 0;
+  if (appuis.a) sens = SENS_BOUTON_A; else if (appuis.b) sens = -SENS_BOUTON_A;
+  if (sens) {
+    const n = FORMES[p.type].length, r = (p.rot + sens + n) % n;
+    if (n > 1 && !collision(p.type, r, p.x, p.y)) { p.rot = r; sfx.tourner(); }
+  }
+  // 2. Déplacement latéral avec délai puis répétition
+  if (appuis.gauche) { J.dir = -1; J.das = 0; deplacer(-1); }
+  else if (appuis.droite) { J.dir = 1; J.das = 0; deplacer(1); }
+  else if (J.dir && ((J.dir < 0 && tenu.gauche) || (J.dir > 0 && tenu.droite))) {
+    if (++J.das >= DAS_DELAI) { deplacer(J.dir); J.das = DAS_DELAI - DAS_PERIODE; }
+  } else { J.dir = tenu.gauche ? -1 : tenu.droite ? 1 : 0; J.das = 0; }
+  // 3. Descente : rapide (bas maintenu) ou gravité du niveau. Si la pièce ne peut plus descendre, elle se fige.
+  if (appuis.bas) J.descenteArmee = true;
+  if (!tenu.bas) { J.descenteArmee = false; J.ptsDescente = 0; J.cptDescente = 0; }
+  let descendre = false, rapide = false;
+  if (J.descenteArmee && tenu.bas) { if (++J.cptDescente >= DESCENTE_RAPIDE_IMAGES) { J.cptDescente = 0; descendre = true; rapide = true; } }
+  if (++J.gravite >= VITESSES[Math.min(J.niveau, VITESSES.length - 1)]) { descendre = true; }
+  if (descendre) {
+    J.gravite = 0;
+    if (!collision(p.type, p.rot, p.x, p.y + 1)) { p.y++; if (rapide) J.ptsDescente++; }
+    else verrouiller();
+  }
+}
+function finDePartie() {
+  etat = "fin"; J.cptFin = 0; arreterMusique(); sfx.fin();
+  resultat = { mode: J.mode, score: J.score, rang: -1 };
+  if (J.mode === "A" && J.score > 0) resultat.rang = enregistrerScore("A", { s: J.score, n: J.niveau, l: J.lignes });
+}
+function palierAtteint(score) { let p = 0; PALIERS_RECOMPENSE.forEach((s, i) => { if (score >= s) p = i + 1; }); return p; }
+
+/* ---------- Réussite du mode B ---------- */
+function reussiteModeB() {
+  etat = "reussite"; J.cptFin = 0; arreterMusique(); sfx.bravo();
+  resultat = { mode: "B", score: J.score, rang: enregistrerScore("B", { s: J.score, n: J.niveau, l: J.lignes, h: J.hauteur }) };
+}
+
+/* ---------- Scène de récompense ---------- */
+function demarrerRecompense(palier) {
+  R = { t: 0, palier, depart: [0, 150, 170, 190][palier], etoiles: [] };
+  for (let i = 0; i < 46; i++) R.etoiles.push({ x: Math.floor(Math.random() * 160), y: Math.floor(Math.random() * 118), ph: Math.floor(Math.random() * 4), v: 1 + Math.floor(Math.random() * 3) });
+  etat = "recompense";
+}
+function feuArtifice(x, y, age, c1 = 0, c2 = 1) {
+  if (age < 0 || age > 44) return;
+  const r = 2 + age * 0.55;
+  for (let k = 0; k < 14; k++) { const a = k * Math.PI / 7; px(x + Math.cos(a) * r, y + Math.sin(a) * r + age * age * 0.006, age < 26 ? c1 : c2); }
+  if (age < 16) for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.3; px(x + Math.cos(a) * r * 0.5, y + Math.sin(a) * r * 0.5, c2); }
+}
+function faisceau(x0, y0, angle, longueur, c) {
+  for (let r = 6; r < longueur; r++) {
+    const x = x0 + Math.cos(angle) * r, y = y0 - Math.sin(angle) * r, l = 1 + r / 9;
+    for (let k = -l; k <= l; k++) { const X = Math.round(x + k), Y = Math.round(y); if ((X + Y) % 2 === 0 && Y < 128) px(X, Y, c); }
+  }
+}
+function dessinerRecompense() {
+  const t = R.t, p = R.palier, d = t - R.depart;
+  rect(0, 0, 160, 144, 3);
+  // ciel étoilé (au palier 3, les étoiles filent pendant le départ)
+  R.etoiles.forEach(e => {
+    const c = ((t >> 4) + e.ph) % 4 === 0 ? 1 : 0;
+    if (p === 3 && d > 50) rect(e.x, (e.y + (d - 50) * (e.v + 1)) % 124, 1, 2 + e.v * 2, c); else px(e.x, e.y, c);
+  });
+  ellipse(136, 16, 5, 5, () => 0); ellipse(138, 14, 4, 4, () => 3);    // croissant de lune
+  // sol et collines
+  for (let x = 0; x < 160; x++) { const h = 4 + Math.round(3 * Math.sin(x / 13) + 2 * Math.sin(x / 5 + 1)); rect(x, 128 - h, 1, h + 16, 2); }
+  for (let x = 3; x < 160; x += 7) px(x, 134 + (x % 3) * 3, 3);
+
+  if (p === 1) {            // ---- Montgolfière : elle se gonfle, puis s'élève doucement
+    const alt = d > 0 ? 0.0035 * d * d : 0, y0 = 124 - alt;
+    const cx = 80 + Math.round(4 * Math.sin(t / 40)) * (d > 0 ? 1 : 0);
+    const s = Math.min(1, 0.3 + 0.7 * t / (R.depart * 0.8)), rx = Math.round(15 * s), ry = Math.round(18 * s), cy = y0 - 13 - ry;
+    ellipse(cx, cy, rx, ry, (x, y) => (Math.floor((x + rx) / 4) % 2) ? 1 : 0);
+    rect(cx - 3, cy + ry - 1, 6, 3, 1);
+    for (let k = 0; k < 7; k++) { px(cx - 4, y0 - 7 - k, 1); px(cx + 3, y0 - 7 - k, 1); }
+    cadre(cx - 5, y0 - 6, 10, 6, 2, 0);
+    if (t % 8 < 4) rect(cx - 1, y0 - 11, 2, 4, 0);
+    if (d > 0 && d < 40) for (let k = 0; k < 2; k++) rect(cx - 9 + k * 16, 118 + Math.min(8, d * 0.4), 2, 2, 1);   // lest lâché
+  } else if (p === 2) {     // ---- Dirigeable : projecteurs, confettis, feux d'artifice
+    const alt = d > 0 ? 0.004 * d * d : 0, y0 = 122 - alt, cx = 78 + (d > 0 ? Math.round(d * 0.18) : 0), cy = y0 - 17;
+    faisceau(18, 124, 1.0 + 0.35 * Math.sin(t / 30), 120, 2);
+    faisceau(142, 124, 2.1 + 0.35 * Math.sin(t / 26 + 1), 120, 2);
+    rect(cx - 42, cy - 10, 9, 5, 1); rect(cx - 42, cy + 6, 9, 5, 1); rect(cx - 40, cy - 2, 8, 5, 1);     // empennage
+    ellipse(cx, cy, 35, 11, (x, y) => ((x + 35) % 12 === 0) ? 2 : (y < -3 ? 0 : (y < 5 ? 1 : 2)));
+    cadre(cx - 11, cy + 11, 22, 6, 1, 0);
+    for (let k = 0; k < 5; k++) px(cx - 8 + k * 4, cy + 14, 3);
+    rect(cx - 14, cy + 12 + ((t >> 1) % 2) * 2, 2, 3, 0);                                                // hélice
+    if (d <= 0) { rect(36, 96, 2, 32, 1); rect(38, cy, cx - 35 - 38, 1, 1); }                             // mât d'amarrage
+    if (d > 0) {
+      for (let k = 0; k < 26; k++) px((k * 37 + t * (1 + k % 2)) % 160, (k * 23 + t * (1 + k % 3)) % 126, k % 2);
+      feuArtifice(34, 40, (d - 60) % 110); feuArtifice(126, 52, (d - 100) % 110);
+    }
+  } else {                  // ---- Soucoupe : rayon, blocs aspirés, éclair, départ en zigzag, bouquet final
+    let cx = 80, cy = 58;
+    if (d <= 0) {
+      cy += Math.round(2 * Math.sin(t / 12));
+      for (let y = cy + 7; y < 126; y++) { const l = 8 + (y - cy) * 0.22; for (let x = -l; x <= l; x++) if ((Math.round(cx + x) + y + (t >> 2)) % 2 === 0) px(cx + x, y, 1); }
+      const by = 118 - Math.min(48, t * 0.3);
+      [1, 4, 6, 7].forEach((tu, k) => { if (by > cy + 10 - k) tuile(tu, cx - 8 + (k % 2) * 8, by - (k >> 1) * 8); });
+    } else if (d < 30) { cx += (d % 4 < 2 ? -2 : 2); }
+    else { const e = d - 30; cx = 80 + Math.round(52 * Math.sin(e / 9)); cy = 58 - 0.012 * e * e; }
+    if (d >= 30 && d < 36) rect(0, 0, 160, 144, d % 2 ? 0 : 1);                                           // éclair
+    if (d > 30) for (let k = 0; k < 3; k++) { const r = ((d - 30) * 1.2 + k * 22) % 70; ellipse(80, 126, r, Math.max(1, Math.round(r / 4)), (x, y) => (Math.abs(x) >= r - 1 || Math.abs(y) >= Math.round(r / 4) - 0) && (x + y) % 2 === 0 ? 1 : -1); }
+    ellipse(cx, cy - 5, 10, 7, (x, y) => (x < -3 && y < -2) ? 0 : 1);
+    ellipse(cx, cy, 28, 6, (x, y) => (y === 0 && ((x + 28 + (t >> 2)) % 8 < 2)) ? 3 : (y < 0 ? 0 : 1));
+    ellipse(cx, cy + 6, 11, 3, () => 2);
+    if (d > 60) { [[30, 36, 0], [128, 30, 28], [80, 22, 56], [52, 70, 80], [112, 76, 100]].forEach(f => feuArtifice(f[0], f[1], (d - 60 - f[2] + 132) % 132)); }
+    if (d > 60) for (let k = 0; k < 30; k++) px((k * 41 + t * 2) % 160, (k * 29 + t * (1 + k % 3)) % 126, k % 2);
+  }
+  if (d > 230) {
+    cadre(20, 36, 120, 80, 3, 1);
+    texteCentre("BRAVO!", 44, 0, 2);
+    texteCentre(["", "MONTGOLFIERE", "DIRIGEABLE", "SOUCOUPE"][p], 64, 1);
+    texteCentre("PALIER " + p + " SUR 3", 76, 0);
+    texteCentre("SCORE " + resultat.score, 88, 0);
+    if ((t >> 5) % 2) texteCentre("START", 104, 1);
+  }
+}
+function logiqueRecompense() {
+  R.t++;
+  const d = R.t - R.depart;
+  if (d === 0) sfx.decollage();
+  if (R.palier >= 2 && d > 60 && d % (R.palier === 3 ? 28 : 55) === 0 && d < 600) sfx.feu();
+  if (d === 235) sfx.bravo();
+  if ((appuis.start || appuis.a) && R.t > 40) { etat = "scores"; sfx.valider(); }
+}
+
+/* ---------- Logique des écrans ---------- */
+function logique() {
+  horloge++;
+  lireManette();
+  switch (etat) {
+    case "titre":
+      if (appuis.start || appuis.a) { etat = "reglages"; ligneReglage = 0; sfx.valider(); jouerMusique(P.musique); }
+      break;
+    case "reglages": logiqueReglages(); break;
+    case "jeu": logiqueJeu(); break;
+    case "pause":
+      if (appuis.start) { etat = "jeu"; sfx.pause(); jouerMusique(P.musique); }
+      break;
+    case "fin":
+      J.cptFin++;
+      if (J.cptFin > HAUTEUR * RIDEAU_IMAGES_PAR_LIGNE + 40 && (appuis.start || appuis.a)) {
+        const p = J.mode === "A" ? palierAtteint(J.score) : 0;
+        if (p) demarrerRecompense(p); else { etat = "scores"; sfx.valider(); }
+      }
+      break;
+    case "reussite":
+      J.cptFin++;
+      if (J.cptFin > 90 && (appuis.start || appuis.a)) { etat = "scores"; sfx.valider(); }
+      break;
+    case "recompense": logiqueRecompense(); break;
+    case "scores":
+      if (appuis.start || appuis.a) { etat = "reglages"; ligneReglage = 0; sfx.valider(); jouerMusique(P.musique); }
+      else if (appuis.b) { etat = "titre"; sfx.menu(); }
+      break;
+  }
+  appuis = {};
+}
+function lignesReglage() { return P.mode === "B" ? [0, 1, 2, 3, 4] : [0, 1, 2, 4]; }
+function logiqueReglages() {
+  const L = lignesReglage();
+  let pos = L.indexOf(ligneReglage); if (pos < 0) { pos = 0; ligneReglage = L[0]; }
+  if (appuis.haut) { ligneReglage = L[(pos + L.length - 1) % L.length]; sfx.menu(); }
+  if (appuis.bas) { ligneReglage = L[(pos + 1) % L.length]; sfx.menu(); }
+  const dx = appuis.gauche ? -1 : appuis.droite ? 1 : 0;
+  if (dx) {
+    if (ligneReglage === 0) P.mode = P.mode === "A" ? "B" : "A";
+    else if (ligneReglage === 1) { const nbM = MUSIQUES.length + 1; let i = P.musique < 0 ? nbM - 1 : P.musique; i = (i + dx + nbM) % nbM; P.musique = i === nbM - 1 ? -1 : i; jouerMusique(P.musique); }
+    else if (ligneReglage === 2) { const k = P.mode === "A" ? "niveauA" : "niveauB"; P[k] = (P[k] + dx + 10) % 10; }
+    else if (ligneReglage === 3) P.hauteur = (P.hauteur + dx + 6) % 6;
+    else P.ecran = P.ecran === "couleur" ? "retro" : "couleur";
+    sfx.menu(); sauver();
+  }
+  if (appuis.start || appuis.a) { sfx.valider(); lancerPartie(); }
+  else if (appuis.b) { etat = "titre"; arreterMusique(); sfx.menu(); }
+}
+
+/* ---------- Dessin des écrans ---------- */
+function dessinerTitre() {
+  rect(0, 0, 160, 144, 0);
+  for (let x = 0; x < 160; x += 8) { tuile(9, x, 0); tuile(9, x, 136); }
+  const nom = nettoyer(NOM_DU_JEU);
+  const ech = largeurTexte(nom, 3) <= 150 ? 3 : largeurTexte(nom, 2) <= 150 ? 2 : 1;
+  const yNom = ech === 3 ? 13 : 16;
+  texteCentre(nom, yNom + 1, 1, ech, 1, 160);          // ombre
+  if (couleurActive()) {
+    const x0 = Math.floor((160 - largeurTexte(nom, ech)) / 2);
+    for (let i = 0; i < nom.length; i++) texte(nom[i], x0 + i * 6 * ech, yNom, COULEURS_PIECES[i % 7], ech);
+  } else texteCentre(nom, yNom, 3, ech);
+  texteCentre(SOUS_TITRE, 39, 2);
+  for (let i = 0; i < 7; i++) tuile(i + 1, 39 + i * 12, 50);
+  if ((horloge >> 5) % 2) texteCentre("APPUIE SUR START", 63, 3);
+  else if (manetteBranchee) texteCentre("MANETTE PRETE", 63, 2);
+  (manetteBranchee ? AIDE_MANETTE : document.body.classList.contains("tactile") ? AIDE_TACTILE : AIDE_TOUCHES).forEach((l, i) => texte(l, 20, 77 + i * 9, 2));
+}
+function dessinerReglages() {
+  rect(0, 0, 160, 144, 0);
+  for (let x = 0; x < 160; x += 8) tuile(9, x, 0);
+  texteCentre("REGLAGES", 12, 3);
+  const niveau = P.mode === "A" ? P.niveauA : P.niveauB;
+  const lignes = [["MODE", P.mode], ["MUSIQUE", P.musique < 0 ? "SANS" : MUSIQUES[P.musique].nom], ["NIVEAU", String(niveau)],
+                  ["HAUTEUR", P.mode === "B" ? String(P.hauteur) : "-"], ["ECRAN", couleurActive() ? "COULEUR" : "RETRO"]];
+  lignes.forEach((l, i) => {
+    const y = 26 + i * 13, sel = i === ligneReglage, gris = (i === 3 && P.mode === "A");
+    if (sel) { rect(10, y - 3, 140, 13, 1); if ((horloge >> 4) % 2) texte(">", 13, y, 3); }
+    texte(l[0], 22, y, gris ? 1 : 3);
+    if (!gris) { texte("<", 74, y, sel ? 3 : 2); texteCentre(l[1], y, 3, 1, 80, 60); texte(">", 141, y, sel ? 3 : 2); }
+    else texteCentre(l[1], y, 1, 1, 80, 60);
+  });
+  texteCentre(P.mode === "A" ? "MODE A : SANS FIN" : "MODE B : " + LIGNES_MODE_B + " LIGNES", 93, 2);
+  const liste = sauvegarde.scores[P.mode];
+  texteCentre("RECORD " + (liste.length ? liste[0].s : 0), 104, 2);
+  texteCentre("START OU A : JOUER", 119, 3);
+  texteCentre("B : RETOUR", 130, 2);
+}
+function dessinerPanneau() {
+  rect(PANNEAU_X, 0, 64, 144, 1);
+  const bloc = (titre, valeur, y) => { texte(titre, 100, y, 3); cadre(100, y + 9, 56, 13, 0, 3); texteDroite(String(valeur), 153, y + 12, 3); };
+  bloc("SCORE", J.score, 3);
+  bloc("NIVEAU", J.niveau, 29);
+  bloc("LIGNES", J.mode === "B" ? Math.max(0, LIGNES_MODE_B - J.lignes) : J.lignes, 55);
+  texte("SUIVANTE", 100, 83, 3);
+  cadre(108, 93, 40, 40, 0, 3);
+  if (etat !== "pause") {
+    const f = FORMES[J.suivante][0];
+    let x0 = 9, x1 = 0, y0 = 9, y1 = 0;
+    f.forEach(c => { x0 = Math.min(x0, c[0]); x1 = Math.max(x1, c[0]); y0 = Math.min(y0, c[1]); y1 = Math.max(y1, c[1]); });
+    const ox = 128 - ((x1 - x0 + 1) * T) / 2 - x0 * T, oy = 113 - ((y1 - y0 + 1) * T) / 2 - y0 * T;
+    f.forEach(c => tuile(J.suivante + 1, ox + c[0] * T, oy + c[1] * T));
+  }
+  texteCentre("MODE " + J.mode, 135, 3, 1, PANNEAU_X, 64);
+}
+function dessinerJeu() {
+  rect(0, 0, 160, 144, 0);
+  for (let y = 0; y < 144; y += 8) { tuile(9, 0, y); tuile(9, CHAMP_X + LARGEUR * T, y); }
+  dessinerPanneau();
+  if (etat === "pause") {
+    texteCentre("PAUSE", 56, 3, 1, CHAMP_X, 80);
+    if ((horloge >> 5) % 2) { texteCentre("START :", 74, 2, 1, CHAMP_X, 80); texteCentre("REPRENDRE", 84, 2, 1, CHAMP_X, 80); }
+    return;
+  }
+  const clignote = J.phase === "clignote";
+  for (let y = 0; y < HAUTEUR; y++) {
+    const pleine = clignote && J.pleines.indexOf(y) >= 0;
+    if (pleine && J.cpt >= CLIGNOTEMENT_FIN) continue;                       // ligne déjà effacée, le tas n'est pas encore tombé
+    const eclair = pleine && Math.floor(J.cpt / CLIGNOTEMENT_IMAGES) % 2 === 0;
+    for (let x = 0; x < LARGEUR; x++) {
+      const c = J.grille[y][x]; if (!c) continue;
+      if (eclair) rect(CHAMP_X + x * T, y * T, T, T, couleurActive() ? 3 : 1); else tuile(c, CHAMP_X + x * T, y * T);
+    }
+  }
+  if (J.piece && etat === "jeu") {
+    const p = J.piece;
+    FORMES[p.type][p.rot].forEach(c => { const cy = p.y + c[1]; if (cy >= 0) tuile(p.type + 1, CHAMP_X + (p.x + c[0]) * T, cy * T); });
+  }
+  if (etat === "fin") {
+    const n = Math.min(HAUTEUR, Math.floor(J.cptFin / RIDEAU_IMAGES_PAR_LIGNE));
+    for (let k = 0; k < n; k++) for (let x = 0; x < LARGEUR; x++) tuile(8, CHAMP_X + x * T, (HAUTEUR - 1 - k) * T);
+    if (J.cptFin > HAUTEUR * RIDEAU_IMAGES_PAR_LIGNE + 20) {
+      cadre(CHAMP_X + 6, 46, 68, 50, 0, 3);
+      texteCentre("FIN DE", 52, 3, 1, CHAMP_X, 80); texteCentre("PARTIE", 62, 3, 1, CHAMP_X, 80);
+      texteCentre(String(J.score), 74, 2, 1, CHAMP_X, 80);
+      if ((horloge >> 5) % 2) texteCentre("START", 85, 3, 1, CHAMP_X, 80);
+    }
+  }
+}
+function dessinerReussite() {
+  const t = J.cptFin;
+  rect(0, 0, 160, 144, 0);
+  texteCentre("MODE B REUSSI", 12, 3);
+  texteCentre(LIGNES_MODE_B + " LIGNES!", 26, 3, 2);
+  texteCentre("NIVEAU " + J.niveau + "  HAUTEUR " + J.hauteur, 46, 2);
+  // les blocs dansent : d'autant plus nombreux que la hauteur de départ était grande
+  const n = Math.min(7, 2 + J.hauteur), x0 = 80 - (n * 20) / 2 + 2;
+  for (let i = 0; i < n; i++) {
+    const saut = Math.abs(Math.sin(t / 9 + i * 0.8)) * 14, x = x0 + i * 20, y = Math.round(104 - saut);
+    tuile(i + 1, x, y, 2);
+    rect(x + 4, y + 5, 3, 3, 0); rect(x + 9, y + 5, 3, 3, 0); px(x + 5, y + 6, 3); px(x + 10, y + 6, 3);   // yeux
+    const pas = (t >> 3) % 2;
+    rect(x + 3 + pas, y + 16, 3, 2, 3); rect(x + 10 - pas, y + 16, 3, 2, 3);                              // pieds
+  }
+  rect(0, 122, 160, 2, 3);
+  for (let k = 0; k < 10 + J.hauteur * 4; k++) texte("*", (k * 37 + 11) % 154, ((k * 29 + t * (1 + k % 2)) % 60) + 54, k % 2 ? 1 : 2);
+  if (J.niveau >= 9 && J.hauteur >= 5) { feuArtifice(30, 60, t % 90, 3, 2); feuArtifice(130, 64, (t + 45) % 90, 3, 2); }
+  texteCentre("SCORE " + J.score, 128, 3);
+  if (t > 90 && (horloge >> 5) % 2) texteCentre("START", 137, 2);
+}
+function dessinerScores() {
+  rect(0, 0, 160, 144, 0);
+  for (let x = 0; x < 160; x += 8) tuile(9, x, 0);
+  texteCentre("MEILLEURS SCORES", 14, 3);
+  texteCentre("MODE " + resultat.mode, 26, 2);
+  const liste = sauvegarde.scores[resultat.mode];
+  for (let i = 0; i < NB_SCORES; i++) {
+    const y = 42 + i * 12, e = liste[i], moi = i === resultat.rang;
+    if (moi && (horloge >> 4) % 2) rect(14, y - 2, 132, 11, 1);
+    texte((i + 1) + ".", 20, y, 3);
+    if (e) { texteDroite(String(e.s), 86, y, 3); texte("NIV " + e.n + (resultat.mode === "B" ? " H" + (e.h || 0) : ""), 96, y, 2); }
+    else texteDroite("------", 86, y, 1);
+  }
+  texteCentre("TON SCORE " + resultat.score, 106, 3);
+  texteCentre("START OU A : REJOUER", 122, 3);
+  texteCentre("B : ECRAN TITRE", 132, 2);
+}
+let classeCouleur = null;
+function dessiner() {
+  const c = couleurActive();
+  PAL = !c ? PALETTE : (etat === "recompense" ? PALETTE_SCENES_COULEUR : PALETTE_COULEUR);
+  if (c !== classeCouleur) { classeCouleur = c; document.body.classList.toggle("couleur", c); }
+  switch (etat) {
+    case "titre": dessinerTitre(); break;
+    case "reglages": dessinerReglages(); break;
+    case "jeu": case "pause": case "fin": dessinerJeu(); break;
+    case "reussite": dessinerReussite(); break;
+    case "recompense": dessinerRecompense(); break;
+    case "scores": dessinerScores(); break;
+  }
+}
+
+/* ---------- Boucle principale : logique à cadence fixe, dessin à chaque rafraîchissement ---------- */
+const PAS = 1000 / IMAGES_PAR_SECONDE;
+let dernier = 0, reserve = 0;
+function boucle(maintenant) {
+  if (!dernier) dernier = maintenant;
+  reserve += Math.min(250, maintenant - dernier); dernier = maintenant;
+  while (reserve >= PAS) { logique(); reserve -= PAS; }
+  dessiner();
+  requestAnimationFrame(boucle);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && etat === "jeu") { etat = "pause"; arreterMusique(); }
+  dernier = 0;
+});
+ajusterTaille();
+requestAnimationFrame(boucle);
+
+// Installation sur téléphone : active le mode hors connexion quand le jeu est servi par un site web
+// (sans effet quand on ouvre simplement le fichier depuis l'ordinateur)
+if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
+  window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+}
+</script>
+</body>
+</html>
