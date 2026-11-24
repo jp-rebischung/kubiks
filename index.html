@@ -13,7 +13,7 @@
     font-family: system-ui, sans-serif; -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none; touch-action: none; }
   #app { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
-  #cadre { background: #3a4032; padding: 10px; border-radius: 10px 10px 26px 10px; box-shadow: 0 4px 0 #14170f; }
+  #cadre { flex: none; background: #3a4032; padding: 10px; border-radius: 10px 10px 26px 10px; box-shadow: 0 4px 0 #14170f; }
   canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; background: #d8e8a0; }
   body.couleur #cadre { background: #2a2e3e; box-shadow: 0 4px 0 #0c0e16; }
   #barre { display: flex; gap: 10px; align-items: center; font-size: 13px; }
@@ -21,19 +21,27 @@
     padding: 8px 14px; font: inherit; font-weight: 600; letter-spacing: 1px; }
   #barre button:active, #btnStart.actif { background: #5a6350; }
   #aideClavier { opacity: .6; }
-  #tactile { display: none; width: 100%; max-width: 460px; box-sizing: border-box; padding: 4px 16px 14px;
+  /* Taille des commandes tactiles : proportionnelle à la largeur de l'écran, avec un maximum */
+  :root { --croix: min(140px, 34vw); --boutons: min(144px, 35vw); }
+  /* Téléphone tenu en hauteur : commandes dans le quart du bas, l'écran de jeu prend le reste */
+  body.portrait { --croix: min(140px, 34vw, 19vh); --boutons: min(144px, 35vw, 19vh); }
+  body.portrait #app { justify-content: flex-end; gap: 6px; }
+  body.portrait #cadre { margin: auto 0; padding: 6px; border-radius: 8px 8px 18px 8px; }
+  body.portrait #barre button { padding: 5px 14px; font-size: 12px; }
+  body.portrait #tactile { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  #tactile { display: none; width: 100%; max-width: 460px; box-sizing: border-box; padding: 4px 4vw 12px;
     justify-content: space-between; align-items: center; }
-  #croix { position: relative; width: 156px; height: 156px; flex: none; touch-action: none; }
+  #croix { position: relative; width: var(--croix); height: var(--croix); flex: none; touch-action: none; }
   #croix i { position: absolute; background: #4a5240; border-radius: 8px; }
-  #croix .h { left: 0; right: 0; top: 52px; height: 52px; }
-  #croix .v { top: 0; bottom: 0; left: 52px; width: 52px; }
-  #croix b { position: absolute; width: 52px; height: 52px; border-radius: 8px; }
+  #croix .h { left: 0; right: 0; top: 33.33%; height: 33.34%; }
+  #croix .v { top: 0; bottom: 0; left: 33.33%; width: 33.34%; }
+  #croix b { position: absolute; width: 33.34%; height: 33.34%; border-radius: 8px; }
   #croix[data-dir="haut"] .bh, #croix[data-dir="bas"] .bb, #croix[data-dir="gauche"] .bg, #croix[data-dir="droite"] .bd { background: #7c886a; }
-  #croix .bh { left: 52px; top: 0; } #croix .bb { left: 52px; bottom: 0; }
-  #croix .bg { left: 0; top: 52px; } #croix .bd { right: 0; top: 52px; }
-  #boutons { position: relative; width: 160px; height: 150px; flex: none; }
-  .rond { position: absolute; width: 78px; height: 78px; border-radius: 50%; background: #6a2f45; color: #f0d8e0;
-    border: 3px solid #3c1826; font-size: 24px; font-weight: 700; display: flex; align-items: center; justify-content: center; touch-action: none; }
+  #croix .bh { left: 33.33%; top: 0; } #croix .bb { left: 33.33%; bottom: 0; }
+  #croix .bg { left: 0; top: 33.33%; } #croix .bd { right: 0; top: 33.33%; }
+  #boutons { position: relative; width: var(--boutons); height: calc(var(--boutons) * 0.94); flex: none; }
+  .rond { position: absolute; width: 48%; height: 51%; border-radius: 50%; background: #6a2f45; color: #f0d8e0;
+    border: 3px solid #3c1826; font-size: calc(var(--boutons) * 0.15); font-weight: 700; display: flex; align-items: center; justify-content: center; touch-action: none; }
   .rond.actif { background: #a04a68; }
   #btnB { left: 0; bottom: 0; } #btnA { right: 0; top: 0; }
   body.tactile #tactile { display: flex; }
@@ -180,6 +188,8 @@ const CLE_SAUVEGARDE = "jeu-de-blocs-89";
 
 // --- Affichage
 const ECHELLE_ENTIERE = true;   // true : agrandissement en multiples entiers (pixels parfaitement nets)
+const DISPOSITION_PORTRAIT = true; // true : sur téléphone tenu en hauteur, score et pièce suivante passent
+                                   // au-dessus de la grille pour qu'elle soit plus grande
 
 // --- Musiques originales. Notation : NOTE:DURÉE (durée en doubles croches), « - » = silence.
 //     « tempo » en battements par minute ; « basse » : une note fondamentale par demi-mesure.
@@ -550,13 +560,22 @@ function lireManette() {
 window.addEventListener("gamepadconnected", () => { manetteBranchee = true; });
 window.addEventListener("gamepaddisconnected", () => { for (const b in tenu) tenu[b] = false; });
 
+function dispositionPortrait() {
+  const tactile = document.body.classList.contains("tactile") || (window.matchMedia && matchMedia("(pointer: coarse)").matches);
+  return DISPOSITION_PORTRAIT && tactile && window.innerHeight > window.innerWidth;
+}
 function ajusterTaille() {
+  const port = dispositionPortrait();
+  document.body.classList.toggle("portrait", port);
   const tact = document.getElementById("tactile"), barre = document.getElementById("barre");
-  const dispoL = window.innerWidth - 28;
-  const dispoH = window.innerHeight - tact.offsetHeight - barre.offsetHeight - 50;
-  let e = Math.min(dispoL / 160, dispoH / 144);
-  e = ECHELLE_ENTIERE ? Math.max(1, Math.floor(e)) : Math.max(1, e);
-  canvas.style.width = (160 * e) + "px"; canvas.style.height = (144 * e) + "px";
+  const dpr = window.devicePixelRatio || 1, cadre = port ? 12 : 20;
+  const dispoL = window.innerWidth - cadre - 12;
+  const dispoH = window.innerHeight - tact.offsetHeight - barre.offsetHeight - cadre - (port ? 22 : 44);
+  let e = Math.min(dispoL / canvas.width, dispoH / canvas.height);
+  // Petit agrandissement : multiple entier de pixels réels (net). Grand agrandissement (téléphone) :
+  // on prend toute la place, la différence d'un pixel réel est invisible.
+  if (ECHELLE_ENTIERE && e * dpr < 6) e = Math.max(1, Math.floor(e * dpr)) / dpr;
+  canvas.style.width = (canvas.width * e) + "px"; canvas.style.height = (canvas.height * e) + "px";
 }
 window.addEventListener("resize", ajusterTaille);
 
@@ -952,15 +971,38 @@ function dessinerScores() {
   texteCentre("START OU A : REJOUER", 122, 3);
   texteCentre("B : ECRAN TITRE", 132, 2);
 }
+// Disposition téléphone : bandeau de 40 pixels au-dessus de la grille (96 × 184 au lieu de 160 × 144)
+function dessinerBandeau() {
+  rect(0, 0, 96, 40, 1);
+  texte("SCORE", 3, 2, 3); cadre(2, 10, 57, 11, 0, 3); texteDroite(String(J.score), 56, 12, 3);
+  texte("NIV", 3, 23, 3); texteDroite(String(J.niveau), 58, 23, 3);
+  const b = J.mode === "B";
+  texte(b ? "RESTE" : "LIG", 3, 32, 3); texteDroite(String(b ? Math.max(0, LIGNES_MODE_B - J.lignes) : J.lignes), 58, 32, 3);
+  cadre(61, 2, 34, 36, 0, 3);
+  if (etat !== "pause") {
+    const f = FORMES[J.suivante][0];
+    let x0 = 9, x1 = 0, y0 = 9, y1 = 0;
+    f.forEach(c => { x0 = Math.min(x0, c[0]); x1 = Math.max(x1, c[0]); y0 = Math.min(y0, c[1]); y1 = Math.max(y1, c[1]); });
+    const ox = 78 - ((x1 - x0 + 1) * T) / 2 - x0 * T, oy = 20 - ((y1 - y0 + 1) * T) / 2 - y0 * T;
+    f.forEach(c => tuile(J.suivante + 1, ox + c[0] * T, oy + c[1] * T));
+  }
+}
+function dessinerJeuPortrait() {
+  dessinerBandeau();
+  ctx.save(); ctx.translate(0, 40); dessinerJeu(); ctx.restore();
+}
 let classeCouleur = null;
 function dessiner() {
+  const portrait = dispositionPortrait() && (etat === "jeu" || etat === "pause" || etat === "fin");
+  const W = portrait ? 96 : 160, H = portrait ? 184 : 144;
+  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; ctx.imageSmoothingEnabled = false; ajusterTaille(); }
   const c = couleurActive();
   PAL = !c ? PALETTE : (etat === "recompense" ? PALETTE_SCENES_COULEUR : PALETTE_COULEUR);
   if (c !== classeCouleur) { classeCouleur = c; document.body.classList.toggle("couleur", c); }
   switch (etat) {
     case "titre": dessinerTitre(); break;
     case "reglages": dessinerReglages(); break;
-    case "jeu": case "pause": case "fin": dessinerJeu(); break;
+    case "jeu": case "pause": case "fin": if (portrait) dessinerJeuPortrait(); else dessinerJeu(); break;
     case "reussite": dessinerReussite(); break;
     case "recompense": dessinerRecompense(); break;
     case "scores": dessinerScores(); break;

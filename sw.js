@@ -1,6 +1,8 @@
 // Garde le jeu en mémoire sur le téléphone pour pouvoir y jouer sans connexion.
-// À CHAQUE MISE À JOUR du jeu : changer ce numéro (v2, v3…) pour que le téléphone récupère la nouvelle version.
-const VERSION = "kubiks-v1";
+// Avec une connexion, le téléphone prend toujours la dernière version mise en ligne ;
+// sans connexion, il utilise la copie gardée en mémoire.
+// (Changer ce numéro n'est plus obligatoire, mais ça ne fait pas de mal.)
+const VERSION = "kubiks-v3";
 const FICHIERS = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -13,5 +15,9 @@ self.addEventListener("activate", e => {
 });
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
-  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(r => r || fetch(e.request)));
+  e.respondWith(
+    fetch(e.request, { cache: "no-cache" })
+      .then(r => { const copie = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copie)); return r; })
+      .catch(() => caches.match(e.request, { ignoreSearch: true }))
+  );
 });
